@@ -176,6 +176,23 @@ docker run -d -p 3000:3000 --name doctor-agent-instance -v $(pwd)/data:/app/data
 
 ---
 
+## 🔒 Concurrency, WhatsApp Slot Holds & No-Show Reclamation
+
+The platform features an enterprise-grade atomic locking and slot reclamation engine:
+
+1. **WhatsApp Slot Holds (10-minute TTL)**:
+   - When any patient selects a slot via WhatsApp, a temporary exclusive lock (`slot_holds`) is acquired.
+   - Other simultaneous WhatsApp users querying that doctor/date have that held slot filtered out in real-time.
+   - If an administrative walk-in or phone booking is attempted on that exact slot, the system returns `409 Conflict: Slot In Progress` preventing double-booking.
+   - If the patient finishes and confirms, the hold converts to a confirmed booking.
+   - If the patient cancels, presses BACK/MENU, or abandons the chat for 10 minutes, the hold auto-expires and reopens to the public.
+
+2. **No-Show & Cancellation Slot Reclamation**:
+   - Marking an appointment as **No-Show** (`no_show`) or **Cancelled** (`cancelled`) preserves the patient's record, notes, and booking history for auditing and billing.
+   - The corresponding calendar time slot is immediately freed and reclaimed, making it available for other patients to book via WhatsApp or walk-in.
+
+---
+
 ## 🔄 Automated 24-Hour Confirmation CRON Job
 
 You can schedule the confirmation check to run every hour using Linux cron:
