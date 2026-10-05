@@ -176,6 +176,43 @@ docker run -d -p 3000:3000 --name doctor-agent-instance -v $(pwd)/data:/app/data
 
 ---
 
+## 🛡️ Clinical Security, RBAC & Physician Account Management
+
+The system incorporates enterprise role-based access control (RBAC), granular permission matrices, and mandatory credential policies to protect clinical patient data:
+
+### 1. Pre-Configured Baseline Accounts
+| Role | Username | Default Password | Mandatory 1st Login Change | Access Scope |
+| :--- | :--- | :--- | :--- | :--- |
+| **System Admin** | `admin` | `Admin@2026!` (or `admin123`) | ⚠️ **Yes (Forced)** | Full global administration, settings & user RBAC |
+| **Medical Director / Owner** | `director` | `Director@2026!` | ⚠️ **Yes (Forced)** | Superuser clinical oversight, all doctors, all logs |
+| **Front Desk Reception** | `reception` | `Reception@2026!` | ⚠️ **Yes (Forced)** | Bookings, walk-ins, cancellations, patient records |
+| **Dr. Alexander Wright, MD** | `dr.wright` | `DoctorPass@2026!` | ⚠️ **Yes (Forced)** | Cardiology schedule & assigned patients |
+| **Dr. Sophia Patel, MD** | `dr.patel` | `DoctorPass@2026!` | ⚠️ **Yes (Forced)** | Pediatrics schedule & assigned patients |
+| **Dr. Marcus Vance, DO** | `dr.vance` | `DoctorPass@2026!` | ⚠️ **Yes (Forced)** | Family medicine schedule & assigned patients |
+
+### 2. Mandatory First-Login Password Change Policy
+- Non-admin staff attempting to log in with their initial temporary password are immediately intercepted by an un-dismissible **Mandatory Password Change Dialog**.
+- The portal workspace remains locked until the user sets a strong new password (minimum 6 characters).
+- Once updated, `must_change_password` is set to `0` and session tokens are re-issued.
+
+### 3. Granular 15-Permission Matrix
+Each user account can have permissions assigned or de-assigned individually in the **👥 Clinic Staff & RBAC Management** tab:
+- `calendar_view`, `calendar_manage`, `calendar_all_doctors`
+- `doctors_view`, `doctors_manage`
+- `unavailability_view`, `unavailability_manage`
+- `appointments_view`, `appointments_manage`, `appointments_cancel`
+- `clients_view`, `clients_manage`
+- `pricing_view`, `pricing_manage`
+- `settings_manage`, `users_manage`
+
+*Note: For physicians without `calendar_all_doctors`, the calendar interface and backend APIs automatically restrict data so physicians can only view and interact with their own allocated patients.*
+
+### 4. Dynamic Auto-Provisioning & Cascading Deactivation
+- **Auto-Provisioning**: Creating a new physician in the **Physicians Directory** automatically creates a corresponding clinical user login account with a unique username, doctor profile link, and initial password.
+- **Cascading Deactivation**: Deactivating or removing a physician in the directory immediately cascades to suspend the linked user account (`is_active = 0`) and revokes all active auth session tokens in real time.
+
+---
+
 ## 🔒 Concurrency, WhatsApp Slot Holds & No-Show Reclamation
 
 The platform features an enterprise-grade atomic locking and slot reclamation engine:
@@ -193,8 +230,32 @@ The platform features an enterprise-grade atomic locking and slot reclamation en
 
 ---
 
-## 🔄 Automated 24-Hour Confirmation CRON Job
+## 🔄 Automated 24-Hour Confirmation CRON Job & Engine Operations
 
+The confirmation banner at the top of the clinic workspace controls the automated attendance verification routine:
+
+### Clinical Objective & ROI
+Patient no-shows cost medical practices an estimated $150B annually. This engine automates patient attendance verification 24 hours prior to visit, allowing clinics to confirm arrivals, detect cancellations early, and alert doctors to attendance risks.
+
+### Button 1: "🚀 Run 24h Confirmation Scan" (`forceMarkUnconfirmed = false`)
+- **Action**: Queries SQLite for all appointments scheduled for tomorrow's date (within 24 to 48 hours) where `confirmation_sent_at IS NULL`.
+- **WhatsApp Dispatch**: Sends an interactive notification to the patient's WhatsApp with full appointment details (Physician name, specialty, date, time slot, and clinic address).
+- **Interactive Prompts**: The message prompts the patient to reply:
+  - `CONFIRM` -> keeps booking confirmed (`confirmed_at = CURRENT_TIMESTAMP`).
+  - `RESCHEDULE` -> launches conversational AI rescheduling to choose a different doctor or date.
+  - `CANCEL` -> cancels the booking and instantly frees the calendar slot for waiting patients.
+- **Doctor Phone Copy**: Sends an alert to the attending physician's personal WhatsApp number (`owner_notifications`) letting them know the confirmation message was dispatched.
+- **Audit Trail**: Sets `confirmation_sent_at` on the appointment record so reminders are never sent twice.
+
+### Button 2: "⚠️ Mark Unconfirmed as Tentative" (`forceMarkUnconfirmed = true`)
+- **Action**: Queries for appointments scheduled for tomorrow where a confirmation message was sent, but the patient *did not respond* within the 24-hour cutoff window (`confirmed_at IS NULL`).
+- **Status Update**: Transitions the appointment status in SQLite from `confirmed` to `tentative`.
+- **Live Weekly Calendar Impact**: The calendar slot immediately turns yellow with a pulsating visual warning badge (`🟡 Tentative`).
+- **Doctor Alert**: Automatically dispatches a high-priority alert to the doctor's personal WhatsApp phone:
+  `⚠️ [MARKED TENTATIVE] Dr. Patel, appointment for John Doe tomorrow at 10:00 AM marked TENTATIVE due to lack of client confirmation response.`
+- **Operational Benefit**: Front desk receptionists can proactively contact unconfirmed patients or offer the slot to walk-in/urgent-care patients.
+
+### Production Execution
 You can schedule the confirmation check to run every hour using Linux cron:
 
 ```bash
@@ -203,3 +264,80 @@ You can schedule the confirmation check to run every hour using Linux cron:
 ```
 
 Or trigger it on-demand directly from the **AI 24-Hour Confirmation Banner** in the web dashboard!
+
+---
+
+## 🌍 Clinic Country & Time Zone Localization
+
+The clinic's geographic location and operational timezone are fully configurable in the **⚙️ Setup & Persona** tab:
+
+1. **Country & Time Zone Configuration**:
+   - Admin can select the clinic's operating country (e.g., Pakistan, United States, United Kingdom, UAE, Saudi Arabia, Canada, Australia, India, etc.) or enter custom coordinates.
+   - Standard IANA timezones (e.g., `Asia/Karachi`, `America/New_York`, `Europe/London`, `Asia/Dubai`, `Asia/Riyadh`, `Asia/Kolkata`, etc.) are mapped with daytime saving offsets and timezone abbreviations (`PKT`, `EDT`, `BST`, `GST`, `IST`, etc.).
+
+2. **Prohibition of Past Slots for Today**:
+   - Booking appointments for past calendar dates is strictly prohibited (`available: false`).
+   - For today's date, the scheduling engine dynamically compares candidate timeslots against the current local time in the clinic's timezone. Any timeslot starting at or before current clinic time is automatically blocked.
+   - Both the WhatsApp conversational agent and calendar walk-in booking enforce this rule, preventing accidental scheduling of expired hours.
+
+3. **Live Time Display & Timezone In Confirmations**:
+   - A real-time clinic clock ticks in the header badge, setup persona card, and walk-in modal so clinic staff always see the current local time.
+   - All WhatsApp confirmations, doctor notifications, calendar walk-in receipts, and 24-hour reminder messages prominently display the clinic timezone label (e.g., `11:00 AM - 11:30 AM (PKT (UTC+5))`).
+
+---
+
+## ⚡ Running on Nebius Token Factory & Nebius AI Cloud (NVIDIA Open-Source Models)
+
+This application supports running on **Nebius Token Factory** and **Nebius AI Cloud** with **NVIDIA open-source models** (e.g. `nvidia/Llama-3.1-Nemotron-70B-Instruct`, `nvidia/nemotron-3-super`, `nvidia/nemotron-4-340b`, or `nvidia/Mistral-NeMo-12B`).
+
+### Architecture: Hybrid Two-Tier System
+1. **Tier 1 (NVIDIA Nemotron on Nebius)**:
+   - Handles free-form natural language questions, symptom queries, doctor background questions, arrival directions, preparation notes, and open-ended FAQ.
+2. **Tier 2 (Deterministic Healthcare Booking Core)**:
+   - Handles calendar timeslot math, atomic concurrency locking (10-minute temporary holds), past-time protection, SQLite transactions, and Meta WhatsApp Cloud API webhooks.
+   - **Benefit**: Zero hallucination on appointment dates, times, prices, and doctor schedules, with frontier AI conversational intelligence.
+
+---
+
+### Option A: Nebius Token Factory (Serverless Inference API)
+
+Nebius Token Factory provides high-throughput, managed inference endpoints with native OpenAI-compatible APIs for open-source models including NVIDIA Nemotron.
+
+1. Obtain your API Key from the [Nebius Token Factory Console](https://tokenfactory.nebius.com).
+2. Configure your environment variables in `.env`:
+   ```bash
+   NEBIUS_API_KEY="your_nebius_api_token"
+   NEBIUS_BASE_URL="https://api.tokenfactory.nebius.com/v1"
+   NEBIUS_MODEL="nvidia/Llama-3.1-Nemotron-70B-Instruct"
+   ```
+3. Start the application:
+   ```bash
+   npm start
+   ```
+   The scheduling agent automatically routes open-ended patient inquiries to NVIDIA Nemotron on Nebius Token Factory.
+
+---
+
+### Option B: Nebius AI Cloud (Dedicated GPU Compute with vLLM / TensorRT-LLM)
+
+If you are hosting your own GPU clusters on Nebius AI Cloud (NVIDIA H100, H200, L40S, or Blackwell B200 instances):
+
+1. **Deploy NVIDIA Nemotron on your GPU instance using vLLM**:
+   ```bash
+   docker run --gpus all \
+     -v ~/.cache/huggingface:/root/.cache/huggingface \
+     -p 8000:8000 \
+     --ipc=host \
+     vllm/vllm-openai:latest \
+     --model nvidia/Llama-3.1-Nemotron-70B-Instruct \
+     --max-model-len 8192 \
+     --tensor-parallel-size 4
+   ```
+
+2. **Configure your WhatsApp scheduling app on the same instance or VPC**:
+   ```bash
+   NEBIUS_BASE_URL="http://localhost:8000/v1"
+   NEBIUS_MODEL="nvidia/Llama-3.1-Nemotron-70B-Instruct"
+   ```
+   No external API key is required when connecting locally within your private Nebius AI Cloud VPC.
+

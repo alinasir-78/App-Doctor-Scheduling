@@ -36,7 +36,13 @@ A professional, text-based WhatsApp AI appointment scheduling agent and clinic m
    - Mark vacations, seminars, or time blocks in the dashboard.
    - Automatically detects booking conflicts and prompts automated patient rescheduling.
 
-7. **Flexible for Any Business**:
+7. **Clinic Country & Time Zone Localization**:
+   - Configurable clinic country (Pakistan, US, UK, UAE, Saudi Arabia, Canada, Australia, India, etc.) and operational IANA timezone.
+   - Prohibits booking past calendar dates or past timeslots for today based dynamically on the clinic's local clock.
+   - Timezone label and abbreviation are clearly included in all WhatsApp confirmations, calendar walk-ins, and 24-hour reminders.
+   - Real-time live clinic clock displayed on the dashboard header, setup persona tab, and walk-in booking modals.
+
+8. **Flexible for Any Business**:
    - Easily adaptable for Medical Clinics, Dental Practices, Therapy, Spas, Law Offices, and Consultants.
 
 ---
@@ -103,20 +109,49 @@ cd whatsapp-doctor-agent
 
 ---
 
+## 👥 Patient Directory & Excel / CSV Import
+
+The clinic portal includes full support for existing patient databases:
+- **Downloadable Sample Templates**: Ready-to-use sample templates in Microsoft Excel (`.xlsx`) and CSV (`.csv`) pre-formatted with expected columns:
+  - `Mobile Number`
+  - `Account Holder Name`
+  - `Patient Full Name`
+  - `Relationship` (`Self`, `Child`, `Spouse`, `Parent`, `Other`)
+  - `Age or DOB`
+  - `Gender`
+  - `Medical Notes / History`
+- **Drag-and-Drop Patient Import**: Upload clinic patient spreadsheets directly from the **Clients & Patients** tab. The system parses all rows, upserts the WhatsApp account holder, and creates linked family member profiles.
+- **Appointments CSV Export**: 1-click export of filtered appointments roster to CSV with RFC 4180 compliant formatting and secure cookie/query-token authentication.
+
+---
+
+## 🗑️ One-Time Sample Data Purge (Before Going Live)
+
+To allow clinic administrators to test the system thoroughly with sample doctors, clients, and appointments before launch:
+- In **Setup & Persona**, a dedicated administrative action allows purging all initial seeded **Doctors, Patients, and Appointments** data with a single click.
+- **Clinic configurations, API tokens, admin accounts, and services & pricing catalog remain 100% intact**.
+- **Permanent Production Lock**: This purge action can only be executed **once**. Once executed, the database locks into permanent production mode, preventing any accidental data loss.
+
+---
+
 ## 📂 Project Structure
 
 ```
 whatsapp-doctor-agent/
 ├── src/
-│   ├── database.js          # SQLite database schema & seed data
-│   ├── slotManager.js       # Dynamic slot calculation & conflict detection
+│   ├── database.js          # SQLite database schema, RBAC, and timezone date helpers
+│   ├── slotManager.js       # Dynamic slot calculation, conflict detection, and slot holds
 │   ├── aiAgent.js           # Conversational AI state machine (English only)
 │   ├── reminderScheduler.js # 24h confirmation checker & status transition
 │   ├── whatsappService.js   # Meta Cloud API webhook handler & message sender
+│   ├── countryData.js       # 230+ world countries dataset & timezone mappings
 │   └── server.js            # Express REST API & static server
 ├── public/
-│   ├── index.html           # Clinic portal & interactive WhatsApp phone simulator
-│   ├── app.js               # Reactive frontend logic
+│   ├── index.html           # Dedicated login, clinic portal & WhatsApp phone simulator
+│   ├── app.js               # Reactive frontend logic, patient importer & CSV exporter
+│   ├── countries.js         # Frontend country and timezone dataset
+│   ├── sample_patients_template.xlsx # Pre-formatted Excel patient import template
+│   ├── sample_patients_template.csv  # Pre-formatted CSV patient import template
 │   └── styles.css           # Clean, mobile-responsive medical styling
 ├── DEPLOYMENT_GUIDE.md      # Comprehensive production deployment manual
 ├── README.md                # Project overview & instructions

@@ -1,18 +1,28 @@
 // test-concurrency.js - Automated concurrency, slot hold, and no-show reclamation test
 const http = require('http');
+const { allQuery } = require('./src/database');
+
+// Ensure server is started
+require('./src/server');
+
+let globalAuthToken = '';
 
 function request(method, path, body = null) {
   return new Promise((resolve, reject) => {
     const postData = body ? JSON.stringify(body) : '';
+    const headers = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(postData)
+    };
+    if (globalAuthToken) {
+      headers['Authorization'] = `Bearer ${globalAuthToken}`;
+    }
     const req = http.request({
       hostname: '127.0.0.1',
       port: 3000,
       path,
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
-      }
+      headers
     }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -45,11 +55,25 @@ async function simMessage(phone, text) {
 async function runTests() {
   console.log('🧪 Starting Concurrency, Slot Hold & No-Show Reclamation Verification...\n');
 
+  // Authenticate as clinic admin
+  console.log('Authenticating as Clinic Director...');
+  const loginRes = await request('POST', '/api/auth/login', { username: 'admin', password: 'Admin@2026!' });
+  if (loginRes.data && loginRes.data.token) {
+    globalAuthToken = loginRes.data.token;
+    console.log('✅ Logged in as:', loginRes.data.user.fullName, '| Role:', loginRes.data.user.role);
+  } else {
+    console.error('❌ Failed to authenticate:', loginRes.data);
+  }
+
   // Use unique test phones for each run
   const runId = Math.floor(Math.random() * 8999 + 1000);
   const testPhoneA = `+1555${runId}01`;
   const testPhoneB = `+1555${runId}02`;
   const testPhoneC = `+1555${runId}03`;
+
+  // Use next working day for Doctor 1 (Monday, Oct 5, 2026)
+  const targetDateStr = '2026-10-05';
+  const targetDayWord = 'Monday';
 
   // Step 1: User A starts booking
   console.log('Step 1: User A enters booking flow...');
@@ -58,7 +82,7 @@ async function runTests() {
   await simMessage(testPhoneA, 'Alice UserA'); // Provide Name -> asks for doctor
   await simMessage(testPhoneA, '1'); // Select Doctor 1 (Dr. Wright) -> asks for service
   await simMessage(testPhoneA, '1'); // Select Service 1 (Cardiology 45m) -> asks for date
-  const dateResA = await simMessage(testPhoneA, 'Tomorrow'); // Date selection
+  const dateResA = await simMessage(testPhoneA, targetDayWord); // Date selection
   console.log('User A slots received:\n' + dateResA.replyText.split('\n').slice(0, 4).join('\n'));
 
   // Step 2: User A selects Slot 1 (acquiring atomic 10-minute hold)
@@ -80,7 +104,7 @@ async function runTests() {
   await simMessage(testPhoneB, 'Bob UserB'); // Name -> asks for doctor
   await simMessage(testPhoneB, '1'); // Doctor 1 -> asks for service
   await simMessage(testPhoneB, '1'); // Service 1 -> asks for date
-  const dateResB = await simMessage(testPhoneB, 'Tomorrow');
+  const dateResB = await simMessage(testPhoneB, targetDayWord);
   console.log('User B slots available:\n' + dateResB.replyText.split('\n').slice(0, 4).join('\n'));
 
   // User B must NOT see the slot held by User A!
@@ -89,9 +113,6 @@ async function runTests() {
 
   // Step 4: Admin walk-in booking test against User A held slot
   console.log(`\nStep 4: Admin calendar walk-in booking test against User A held slot (${heldStartTime})...`);
-  const tmrw = new Date();
-  tmrw.setDate(tmrw.getDate() + 1);
-  const tmrwStr = tmrw.toISOString().split('T')[0];
 
   // Convert heldStartTime to 24h format for walkin request
   let [timePart, modifier] = heldStartTime.split(' ');
@@ -100,12 +121,15 @@ async function runTests() {
   if (modifier === 'AM' && hours === '12') hours = '00';
   const heldStart24 = `${hours.padStart(2, '0')}:${minutes}`;
 
+  const docs = await allQuery('SELECT id FROM doctors ORDER BY id ASC');
+  const primaryDocId = docs[0] ? docs[0].id : 1;
+
   const walkinRes = await request('POST', '/api/appointments', {
-    doctorId: 1,
+    doctorId: primaryDocId,
     patientName: 'Walk-In Conflict Patient',
     clientPhone: '+15559998888',
     serviceId: 1,
-    date: tmrwStr,
+    date: targetDateStr,
     startTime: heldStart24
   });
 
@@ -149,7 +173,7 @@ async function runTests() {
   await simMessage(testPhoneC, 'Charlie UserC');
   await simMessage(testPhoneC, '1'); // Doctor 1
   await simMessage(testPhoneC, '1'); // Service 1
-  const dateResC = await simMessage(testPhoneC, 'Tomorrow');
+  const dateResC = await simMessage(testPhoneC, targetDayWord);
   console.log('User C slot list:\n' + dateResC.replyText.split('\n').slice(0, 4).join('\n'));
   const slot1Reopened = dateResC.replyText.includes(heldStartTime);
   console.log(`Slot ${heldStartTime} successfully reclaimed and available for User C:`, slot1Reopened ? '✅ PASSED' : '❌ FAILED');
@@ -162,9 +186,12 @@ async function runTests() {
   console.log('User C successfully booked reclaimed slot:', userCConfirmed ? '✅ PASSED' : '❌ FAILED');
 
   console.log('\n🎯 ALL CONCURRENCY, HOLD LOCK & NO-SHOW RECLAMATION TESTS PASSED 100%!');
+  process.exit(0);
 }
 
-runTests().catch(err => {
-  console.error('Test error:', err);
-  process.exit(1);
-});
+setTimeout(() => {
+  runTests().catch(err => {
+    console.error('Test error:', err);
+    process.exit(1);
+  });
+}, 800);
